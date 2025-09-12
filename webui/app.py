@@ -59,8 +59,16 @@ AVAILABLE_MODELS = {
 
 def load_data_files():
     """Scan data directory and return available data files"""
-    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'examples', 'data')
     data_files = []
+    
+    # 添加本地黄金数据服务
+    data_files.append({
+        'name': '黄金5分钟K线数据 (本地API)',
+        'path': 'http://120.26.241.175:8000/gold/minute?period=5',
+        'size': '实时数据',
+        'type': 'api'
+    })
     
     if os.path.exists(data_dir):
         for file in os.listdir(data_dir):
@@ -78,6 +86,35 @@ def load_data_files():
 def load_data_file(file_path):
     """Load data file"""
     try:
+        # 检查是否是API数据
+        if file_path.startswith('http'):
+            import requests
+            response = requests.get(file_path)
+            response.raise_for_status()
+            data = response.json()
+            
+            # 转换为DataFrame
+            df = pd.DataFrame(data)
+            
+            # 重命名列以匹配Kronos要求
+            df = df.rename(columns={'datetime': 'timestamps'})
+            
+            # 转换时间戳
+            df['timestamps'] = pd.to_datetime(df['timestamps'])
+            
+            # 确保数值类型
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 按时间排序
+            df = df.sort_values('timestamps').reset_index(drop=True)
+            
+            # 移除缺失值
+            df = df.dropna()
+            
+            return df, None
+        
+        # 原有的文件加载逻辑
         if file_path.endswith('.csv'):
             df = pd.read_csv(file_path)
         elif file_path.endswith('.feather'):
@@ -258,7 +295,7 @@ def create_prediction_chart(df, pred_df, lookback, pred_len, actual_df=None, his
             high=pred_df['high'],
             low=pred_df['low'],
             close=pred_df['close'],
-            name='Prediction Data (120 data points)',
+            name='Prediction Data (288 data points)',
             increasing_line_color='#66BB6A',
             decreasing_line_color='#FF7043'
         ))
@@ -291,14 +328,14 @@ def create_prediction_chart(df, pred_df, lookback, pred_len, actual_df=None, his
             high=actual_df['high'],
             low=actual_df['low'],
             close=actual_df['close'],
-            name='Actual Data (120 data points)',
+            name='Actual Data (288 data points)',
             increasing_line_color='#FF9800',
             decreasing_line_color='#F44336'
         ))
     
     # Update layout
     fig.update_layout(
-        title='Kronos Financial Prediction Results - 400 Historical Points + 120 Prediction Points vs 120 Actual Points',
+        title='Kronos Financial Prediction Results - 400 Historical Points + 288 Prediction Points vs 288 Actual Points',
         xaxis_title='Time',
         yaxis_title='Price',
         template='plotly_white',
@@ -408,7 +445,7 @@ def predict():
         data = request.get_json()
         file_path = data.get('file_path')
         lookback = int(data.get('lookback', 400))
-        pred_len = int(data.get('pred_len', 120))
+        pred_len = int(data.get('pred_len', 288))
         
         # Get prediction quality parameters
         temperature = float(data.get('temperature', 1.0))
